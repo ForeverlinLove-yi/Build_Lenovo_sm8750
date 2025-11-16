@@ -417,7 +417,18 @@ jobs:
           ./patch_linux
           rm -f Image
           mv oImage Image
+          
+      - name: 📦 ReName Image  (修改镜像名)
+        run: |
+          cd kernel_workspace/common/out/arch/arm64/boot
+          cp ./Image "./kernel"
 
+      - name: 📤 Upload Image (上传 Image)
+        uses: actions/upload-artifact@v4
+        with:
+         name: kernel_image
+         path: kernel_workspace/common/out/arch/arm64/boot/kernel
+         
       - name: 📦 Sign boot using AOSP test key (使用AOSP测试密钥签名boot)
         if: ${{inputs.enable_feature_d}}
         run: |
