@@ -444,27 +444,26 @@ jobs:
           echo "FAKETIME=$FAKETIME" >> $GITHUB_ENV
           SO_DIR=$(pwd)
           export PRELOAD_LIBS="$SO_DIR/libfakestat.so $SO_DIR/libfaketimeMT.so"
-          #创建 CC (编译器) 包装器
+          
           echo '#!/bin/bash' > cc-wrapper
           echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> cc-wrapper
           echo 'export FAKESTAT="'$FAKESTAT'"' >> cc-wrapper
           echo 'export FAKETIME="'$FAKETIME'"' >> cc-wrapper
           echo 'ccache clang "$@"' >> cc-wrapper
-          #创建 LD (链接器) 包装器
+          
           echo '#!/bin/bash' > ld-wrapper
           echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> ld-wrapper
           echo 'export FAKESTAT="'$FAKESTAT'"' >> ld-wrapper
           echo 'export FAKETIME="'$FAKETIME'"' >> ld-wrapper
           echo 'ld.lld "$@"' >> ld-wrapper
           
-          # 测试时间劫持测试是否正常工作
           echo "--- [Wrapper Test] 正在创建通用的时间劫持测试脚本 ---"
           echo '#!/bin/bash' > test-wrapper.sh
           echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> test-wrapper.sh
           echo 'export FAKESTAT="'$FAKESTAT'"' >> test-wrapper.sh
           echo 'export FAKETIME="'$FAKETIME'"' >> test-wrapper.sh
           echo 'echo ">>> Wrapper 内部环境检查完毕."' >> test-wrapper.sh
-          echo 'exec "$@"' >> test-wrapper.sh # 执行所有传入的参数
+          echo 'exec "$@"' >> test-wrapper.sh
           chmod +x test-wrapper.sh
           echo "--- [Wrapper Test] 正在测试 (date) 命令 ---"
           ./test-wrapper.sh date
@@ -475,18 +474,52 @@ jobs:
           echo "--- 编译前环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
           echo "--- 编译前环境文件时间戳: ---"
           LD_PRELOAD=$PRELOAD_LIBS stat ./Makefile
-
+          
           export KBUILD_BUILD_TIMESTAMP="${KERNEL_TIME}"
           
-          #在构建内核的同时清除不必要的.NET, Android NDK, Haskell, CodeQL运行库，清理空间且不阻塞后续步骤运行
           sudo rm -rf /usr/share/dotnet &
           sudo rm -rf /usr/local/lib/android &
           sudo rm -rf /opt/ghc &
           sudo rm -rf /opt/hostedtoolcache/CodeQL &
+          
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" LD="ld.lld" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig &&
+          
+          ### ===== 调试插入开始（第一阶段后） =====
+          echo "========== 第一阶段完成 =========="
+          echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
+          echo "KBUILD_BUILD_TIMESTAMP=$KBUILD_BUILD_TIMESTAMP"
+          if [ -f out/init/version-timestamp.c ]; then
+            echo ">>> 找到 version-timestamp.c"
+            echo "----- 文件内容开始 -----"
+            cat out/init/version-timestamp.c
+            echo "----- 文件内容结束 -----"
+            echo ">>> 文件 stat 信息："
+            stat out/init/version-timestamp.c
+          else
+            echo ">>> 未找到 version-timestamp.c"
+            find out -name version-timestamp.c
+          fi
+          echo "==================================="
+          ### ===== 调试插入结束 =====
+          
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error Image
           
-          # 编译后时间劫持二次校验
+          ### ===== 调试插入开始（第二阶段后） =====
+          echo "========== 第二阶段完成 =========="
+          if [ -f out/init/version-timestamp.c ]; then
+            echo ">>> 当前 version-timestamp.c 内容"
+            echo "----- 文件内容开始 -----"
+            cat out/init/version-timestamp.c
+            echo "----- 文件内容结束 -----"
+            echo ">>> 文件 stat 信息："
+            stat out/init/version-timestamp.c
+          else
+            echo ">>> 未找到 version-timestamp.c"
+            find out -name version-timestamp.c
+          fi
+          echo "==================================="
+          ### ===== 调试插入结束 =====
+          
           echo "--- 编译后环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
           echo "--- 编译后环境文件时间戳: ---"
           LD_PRELOAD=$PRELOAD_LIBS stat ./Makefile
@@ -495,6 +528,7 @@ jobs:
           ccache -s
           echo "编译后空间:"
           df -h
+
 
       - name: 📦 Apply KPM and patch the kernel (应用KPM并修补内核)
         if: ${{ env.ENABLE_KPM == 'true' }}
